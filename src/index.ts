@@ -1,4 +1,5 @@
-// CMS Formulary MCP Server
+// CMS Formulary MCP Server — Medicare formulary coverage and restrictions
+// Code Mode only: cms_formulary_search, cms_formulary_execute, query_data, get_schema
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerQueryData } from "./tools/query-data";

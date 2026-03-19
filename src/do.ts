@@ -62,15 +62,17 @@ export class FormularyDataDO extends RestStagingDO {
             }
         }
 
-        // Single record (object, not array)
-        const obj = data as Record<string, unknown>;
-        if (obj.NDC || obj.ndc) {
+        // Single record (object, not array) — use `in` operator for safe narrowing
+        if ("NDC" in data || "ndc" in data) {
             return {
                 tableName: "formulary_drugs",
                 indexes: ["NDC", "ndc", "FORMULARY_ID", "formulary_id"],
             };
         }
-        if ((obj.CONTRACT_ID || obj.contract_id) && (obj.PLAN_ID || obj.plan_id)) {
+        if (
+            ("CONTRACT_ID" in data || "contract_id" in data) &&
+            ("PLAN_ID" in data || "plan_id" in data)
+        ) {
             return {
                 tableName: "plan_info",
                 indexes: ["CONTRACT_ID", "contract_id", "PLAN_ID", "plan_id"],
