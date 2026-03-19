@@ -9,9 +9,10 @@ export const formularyCatalog: ApiCatalog = {
     notes:
         "- CMS Part D Formulary Public Use Files provide Medicare drug plan coverage data\n" +
         "- Three datasets: Plan Info, Basic Drugs (Formulary), and Beneficiary Cost\n" +
-        "- Filtering uses CMS data API syntax: pass field names as query params, they are converted to filter[FieldName]=value\n" +
-        "- Pagination: use size (default 100, max 5000) and offset (0-based) params\n" +
-        "- Field names are UPPERCASE in the API (e.g., NDC, CONTRACT_ID, PLAN_ID)\n" +
+        "- Data sourced from CMS monthly bulk ZIP (nested ZIP, pipe-delimited TXT). Cached 24h.\n" +
+        "- All query params are case-insensitive substring filters against field values\n" +
+        "- Pagination: use limit (default 100) and offset (0-based) params\n" +
+        "- Field names are UPPERCASE (e.g., NDC, CONTRACT_ID, PLAN_ID)\n" +
         "- Tier Level Codes: 1=Preferred Generic, 2=Generic, 3=Preferred Brand, 4=Non-Preferred Drug, 5=Specialty Tier\n" +
         "- Utilization Management Indicators: Y=Yes, N=No for:\n" +
         "  PRIOR_AUTHORIZATION_YN — prior authorization required\n" +
@@ -33,8 +34,7 @@ export const formularyCatalog: ApiCatalog = {
                 { name: "FORMULARY_ID", type: "string", required: false, description: "Formulary ID (links to drug coverage data)" },
                 { name: "PLAN_NAME", type: "string", required: false, description: "Plan name (partial match supported)" },
                 { name: "ORG_NAME", type: "string", required: false, description: "Organization/sponsor name" },
-                { name: "keyword", type: "string", required: false, description: "Full-text keyword search across all fields" },
-                { name: "size", type: "number", required: false, description: "Page size (default 100, max 5000)" },
+                { name: "limit", type: "number", required: false, description: "Max results (default 100)" },
                 { name: "offset", type: "number", required: false, description: "Offset for pagination (0-based)" },
             ],
         },
@@ -50,8 +50,7 @@ export const formularyCatalog: ApiCatalog = {
                 { name: "PRIOR_AUTHORIZATION_YN", type: "string", required: false, description: "Prior auth required (Y or N)" },
                 { name: "STEP_THERAPY_YN", type: "string", required: false, description: "Step therapy required (Y or N)" },
                 { name: "QUANTITY_LIMIT_YN", type: "string", required: false, description: "Quantity limit applies (Y or N)" },
-                { name: "keyword", type: "string", required: false, description: "Full-text keyword search across all fields" },
-                { name: "size", type: "number", required: false, description: "Page size (default 100, max 5000)" },
+                { name: "limit", type: "number", required: false, description: "Max results (default 100)" },
                 { name: "offset", type: "number", required: false, description: "Offset for pagination (0-based)" },
             ],
         },
@@ -68,8 +67,7 @@ export const formularyCatalog: ApiCatalog = {
                 { name: "COST_AMT_PREF", type: "string", required: false, description: "Cost amount for preferred pharmacy" },
                 { name: "COST_TYPE_NONPREF", type: "string", required: false, description: "Cost type for non-preferred pharmacy" },
                 { name: "COST_AMT_NONPREF", type: "string", required: false, description: "Cost amount for non-preferred pharmacy" },
-                { name: "keyword", type: "string", required: false, description: "Full-text keyword search across all fields" },
-                { name: "size", type: "number", required: false, description: "Page size (default 100, max 5000)" },
+                { name: "limit", type: "number", required: false, description: "Max results (default 100)" },
                 { name: "offset", type: "number", required: false, description: "Offset for pagination (0-based)" },
             ],
         },

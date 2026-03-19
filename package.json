@@ -13,10 +13,11 @@
     "test": "npm run type-check && npm run test:regression"
   },
   "dependencies": {
+    "@bio-mcp/shared": "workspace:*",
     "@cloudflare/codemode": "^0.1.1",
     "@modelcontextprotocol/sdk": "1.26.0",
-    "@bio-mcp/shared": "workspace:*",
     "agents": "^0.7.6",
+    "fflate": "^0.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -1,102 +1,95 @@
 import type { ApiFetchFn } from "@bio-mcp/shared/codemode/catalog";
-import { formularyFetch } from "./http";
+import { getFormularyData, type FormularyFileType } from "./http";
 
 /**
- * CMS Data API dataset IDs for Part D Formulary Public Use Files.
- * These are the stable dataset identifiers used in the CMS data API.
- * Updated periodically — these correspond to the current year's files.
+ * Case-insensitive substring filter.
  */
-const DATASET_IDS = {
-    /** Part D Plan Information */
-    planInfo: "f8249ef1-28b9-4c67-9a02-2e2f4b03c0da",
-    /** Basic Drugs — Formulary File (NDCs, tiers, PA/ST/QL) */
-    basicDrugs: "6a3b78e3-acc0-426c-8e12-1b2e1512a183",
-    /** Beneficiary Cost — cost-sharing info by tier and days supply */
-    beneficiaryCost: "77e8c0d3-4576-4acc-bdcc-5f53715d3a61",
-};
+function matchesFilter(
+    records: Record<string, string>[],
+    params: Record<string, unknown>,
+): Record<string, string>[] {
+    const filters = Object.entries(params).filter(
+        ([key, val]) =>
+            key !== "limit" &&
+            key !== "offset" &&
+            key !== "size" &&
+            val !== undefined &&
+            val !== "",
+    );
 
-/**
- * Convert clean query params to CMS data API filter syntax.
- * CMS uses filter[FieldName]=value for field-level filtering.
- */
-function toCmsParams(params?: Record<string, unknown>): Record<string, unknown> {
-    if (!params) return {};
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(params)) {
-        if (value === undefined || value === null) continue;
-        // Pagination params pass through directly
-        if (key === "size" || key === "offset") {
-            out[key] = value;
-        }
-        // keyword is a CMS full-text search parameter
-        else if (key === "keyword") {
-            out["keyword"] = value;
-        }
-        // Already in filter[] syntax — pass through
-        else if (key.startsWith("filter[")) {
-            out[key] = value;
-        }
-        // Convert field-name params to CMS filter syntax
-        else {
-            out[`filter[${key}]`] = value;
-        }
-    }
-    return out;
+    if (filters.length === 0) return records;
+
+    return records.filter((record) =>
+        filters.every(([key, val]) => {
+            const fieldValue = record[key];
+            if (fieldValue === undefined) return false;
+            return fieldValue
+                .toLowerCase()
+                .includes(String(val).toLowerCase());
+        }),
+    );
 }
 
+function paginate(
+    records: Record<string, string>[],
+    params: Record<string, unknown>,
+): Record<string, string>[] {
+    const offset = Number(params.offset) || 0;
+    const limit = Number(params.limit ?? params.size) || 100;
+    return records.slice(offset, offset + limit);
+}
+
+/**
+ * CMS Part D Formulary API adapter.
+ *
+ * Routes:
+ *   GET /plans      — Plan information (contract, plan name, formulary ID, premium, deductible)
+ *   GET /formulary  — Basic drugs formulary (NDC, tier, PA/ST/QL indicators, RXCUI)
+ *   GET /costs      — Beneficiary cost sharing (tier, days supply, copay/coinsurance)
+ *
+ * Data sourced from CMS monthly bulk ZIP (nested ZIP, pipe-delimited TXT).
+ * All query params are case-insensitive substring filters.
+ * Special params: limit/size, offset.
+ */
 export function createFormularyApiFetch(): ApiFetchFn {
     return async (request) => {
-        const path = request.path;
-        let datasetId: string;
+        const path = request.path.replace(/^\/+/, "").split("?")[0];
+        const params = request.params ?? {};
 
-        // Route clean paths to the correct CMS dataset
-        if (path === "/plans" || path.startsWith("/plans?")) {
-            datasetId = DATASET_IDS.planInfo;
-        } else if (path === "/formulary" || path.startsWith("/formulary?")) {
-            datasetId = DATASET_IDS.basicDrugs;
-        } else if (path === "/costs" || path.startsWith("/costs?")) {
-            datasetId = DATASET_IDS.beneficiaryCost;
+        let fileType: FormularyFileType;
+
+        if (path === "plans" || path === "monthly") {
+            fileType = "plans";
+        } else if (path === "formulary" || path === "quarterly") {
+            fileType = "formulary";
+        } else if (path === "costs") {
+            fileType = "costs";
         } else {
-            const error = new Error(
-                `Unknown path: ${path}. Use /plans, /formulary, or /costs.`,
-            ) as Error & { status: number; data: unknown };
-            error.status = 400;
-            error.data = { validPaths: ["/plans", "/formulary", "/costs"] };
-            throw error;
+            throw Object.assign(
+                new Error(
+                    `Unknown path: /${path}. Use /plans, /formulary, or /costs.`,
+                ),
+                {
+                    status: 400,
+                    data: { validPaths: ["/plans", "/formulary", "/costs"] },
+                },
+            );
         }
 
-        const apiPath = `/data-api/v1/dataset/${datasetId}/data`;
-        const cmsParams = toCmsParams(request.params);
+        const allData = await getFormularyData(fileType);
+        const filtered = matchesFilter(allData, params);
+        const results = paginate(filtered, params);
 
-        // Default to a reasonable page size if none specified
-        if (!cmsParams.size) {
-            cmsParams.size = 100;
-        }
-
-        const response = await formularyFetch(apiPath, cmsParams);
-
-        if (!response.ok) {
-            let errorBody: string;
-            try {
-                errorBody = await response.text();
-            } catch {
-                errorBody = response.statusText;
-            }
-            const error = new Error(
-                `HTTP ${response.status}: ${errorBody.slice(0, 200)}`,
-            ) as Error & { status: number; data: unknown };
-            error.status = response.status;
-            error.data = errorBody;
-            throw error;
-        }
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("json")) {
-            const text = await response.text();
-            return { status: response.status, data: text };
-        }
-
-        const data = await response.json();
-        return { status: response.status, data };
+        return {
+            status: 200,
+            data: {
+                total_unfiltered: allData.length,
+                total_filtered: filtered.length,
+                returned: results.length,
+                offset: Number(params.offset) || 0,
+                limit: Number(params.limit ?? params.size) || 100,
+                results,
+            },
+        };
     };
 }
