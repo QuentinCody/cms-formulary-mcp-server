@@ -55,7 +55,7 @@ async function getLatestZipUrl(): Promise<string> {
             }>;
         };
         for (const ds of catalog.dataset ?? []) {
-            if (!ds.title?.toLowerCase().includes(FORMULARY_TITLE_MATCH)) continue;
+            if (!ds.title?.toLowerCase()?.includes(FORMULARY_TITLE_MATCH)) continue;
             const url = ds.distribution?.[0]?.downloadURL;
             if (url?.endsWith(".zip")) {
                 resolvedZipUrl = url;
