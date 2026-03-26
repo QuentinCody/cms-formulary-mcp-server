@@ -6,7 +6,7 @@ interface QueryEnv {
     FORMULARY_DATA_DO?: unknown;
 }
 
-export function registerQueryData(server: McpServer, env?: QueryEnv) {
+export function registerQueryData(server: McpServer, env?: QueryEnv): void {
     const handler = createQueryDataHandler("FORMULARY_DATA_DO", "formulary");
 
     server.registerTool(

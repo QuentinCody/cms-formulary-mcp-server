@@ -18,7 +18,7 @@ interface ToolRegistrar {
 export function registerCodeMode(
     server: McpServer,
     env: CodeModeEnv,
-) {
+): void {
     const apiFetch = createFormularyApiFetch();
 
     const searchTool = createSearchTool({
