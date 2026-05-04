@@ -63,9 +63,7 @@ async function getLatestZipUrl(): Promise<string> {
                 return url;
             }
         }
-    } catch {
-        // fallback
-    }
+    } catch { /* best-effort: fallback */ }
     return resolvedZipUrl ?? FALLBACK_ZIP_URL;
 }
 
@@ -137,17 +135,13 @@ function extractFromZipBuffer(buffer: Uint8Array): Record<string, string>[] | nu
                             return parsePipeDelimited(decoder.decode(innerData));
                         }
                     }
-                } catch {
-                    // not a valid inner ZIP
-                }
+                } catch { /* best-effort: not a valid inner ZIP */ }
             }
             if (lowerName.endsWith(".txt")) {
                 return parsePipeDelimited(decoder.decode(data));
             }
         }
-    } catch {
-        // ZIP extraction failed — the range may not align with a complete entry
-    }
+    } catch { /* best-effort: ZIP extraction failed — the range may not align with a complete entry */ }
     return null;
 }
 
