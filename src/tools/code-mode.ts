@@ -29,6 +29,8 @@ export function registerCodeMode(
 
     const executeTool = createExecuteTool({
         prefix: "formulary",
+        // Verifiable provenance: formulary_execute results carry a _meta.citation.
+        source: { id: "formulary", name: "CMS Part D Formulary", url: "https://data.cms.gov", license: "U.S. Public Domain" },
         catalog: formularyCatalog,
         apiFetch,
         doNamespace: env.FORMULARY_DATA_DO as DurableObjectNamespace,

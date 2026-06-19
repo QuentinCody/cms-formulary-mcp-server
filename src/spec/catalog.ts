@@ -21,7 +21,12 @@ export const formularyCatalog: ApiCatalog = {
         "- CONTRACT_ID + PLAN_ID uniquely identify a Medicare Part D plan\n" +
         "- FORMULARY_ID links plans to their drug formularies\n" +
         "- NDC (National Drug Code) is the 11-digit drug product identifier\n" +
-        "- To find drugs in a plan: first get FORMULARY_ID from /plans, then query /formulary with that FORMULARY_ID",
+        "- To find drugs in a plan: first get FORMULARY_ID from /plans, then query /formulary with that FORMULARY_ID\n" +
+        "- /formulary is the large basic-drugs file (1.12M rows, 58MB). It is stream-filtered\n" +
+        "  in-Worker, so it REQUIRES at least one filter param (FORMULARY_ID, NDC, RXCUI, etc.).\n" +
+        "  An unfiltered /formulary call returns a 400 asking you to narrow the query.\n" +
+        "  Up to 1000 matching rows are returned per call; total_filtered reports the full match\n" +
+        "  count and truncated=true indicates more matches exist beyond the returned slice.",
     endpoints: [
         {
             method: "GET",

@@ -1,5 +1,5 @@
 import type { ApiFetchFn } from "@bio-mcp/shared/codemode/catalog";
-import { getFormularyData, type FormularyFileType } from "./http";
+import { getFormularyData, getFormularyMatches, type FormularyFileType } from "./http";
 
 /**
  * Case-insensitive substring filter.
@@ -51,29 +51,47 @@ function paginate(
  * All query params are case-insensitive substring filters.
  * Special params: limit/size, offset.
  */
+function resolveFileType(path: string): FormularyFileType {
+    if (path === "plans" || path === "monthly") return "plans";
+    if (path === "formulary" || path === "quarterly") return "formulary";
+    if (path === "costs") return "costs";
+    throw Object.assign(
+        new Error(`Unknown path: /${path}. Use /plans, /formulary, or /costs.`),
+        { status: 400, data: { validPaths: ["/plans", "/formulary", "/costs"] } },
+    );
+}
+
+/**
+ * Formulary branch: stream-filter the 58MB file (never bulk-loaded).
+ * getFormularyMatches applies filters per-line and caps matched records.
+ */
+async function fetchFormulary(params: Record<string, unknown>) {
+    const { matched, total, records } = await getFormularyMatches(params);
+    const offset = Number(params.offset) || 0;
+    const limit = Number(params.limit ?? params.size) || 100;
+    const results = records.slice(offset, offset + limit);
+    return {
+        status: 200 as const,
+        data: {
+            total_unfiltered: total,
+            total_filtered: matched,
+            returned: results.length,
+            truncated: matched > records.length,
+            offset,
+            limit,
+            results,
+        },
+    };
+}
+
 export function createFormularyApiFetch(): ApiFetchFn {
     return async (request) => {
         const path = request.path.replace(/^\/+/, "").split("?")[0];
         const params = request.params ?? {};
+        const fileType = resolveFileType(path);
 
-        let fileType: FormularyFileType;
-
-        if (path === "plans" || path === "monthly") {
-            fileType = "plans";
-        } else if (path === "formulary" || path === "quarterly") {
-            fileType = "formulary";
-        } else if (path === "costs") {
-            fileType = "costs";
-        } else {
-            throw Object.assign(
-                new Error(
-                    `Unknown path: /${path}. Use /plans, /formulary, or /costs.`,
-                ),
-                {
-                    status: 400,
-                    data: { validPaths: ["/plans", "/formulary", "/costs"] },
-                },
-            );
+        if (fileType === "formulary") {
+            return fetchFormulary(params);
         }
 
         const allData = await getFormularyData(fileType);
