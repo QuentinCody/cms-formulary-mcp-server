@@ -1,3 +1,4 @@
+import { buildHealthResponse, configureCitationSigning } from "@bio-mcp/shared";
 // CMS Formulary MCP Server — Medicare formulary coverage and restrictions
 // Code Mode only: cms_formulary_search, cms_formulary_execute, query_data, get_schema
 import { McpAgent } from "agents/mcp";
@@ -16,6 +17,8 @@ export class MyMCP extends McpAgent<Env> {
     });
 
     async init() {
+
+    	configureCitationSigning(this.env);
         registerQueryData(this.server, this.env);
         registerGetSchema(this.server, this.env);
         registerCodeMode(this.server, this.env);
@@ -27,10 +30,7 @@ export default {
         const url = new URL(request.url);
 
         if (url.pathname === "/health") {
-            return new Response("ok", {
-                status: 200,
-                headers: { "content-type": "text/plain" },
-            });
+            return buildHealthResponse("cms-formulary");
         }
 
         if (url.pathname === "/mcp") {
