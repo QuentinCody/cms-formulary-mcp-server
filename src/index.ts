@@ -1,8 +1,8 @@
 import { buildHealthResponse, configureCitationSigning } from "@bio-mcp/shared";
 // CMS Formulary MCP Server — Medicare formulary coverage and restrictions
 // Code Mode only: cms_formulary_search, cms_formulary_execute, query_data, get_schema
-import { McpAgent } from "agents/mcp";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StatelessMcpWorker } from "@bio-mcp/shared/mcp";
+import { McpServer } from "@bio-mcp/shared/mcp";
 import { registerQueryData } from "./tools/query-data";
 import { registerGetSchema } from "./tools/get-schema";
 import { registerCodeMode } from "./tools/code-mode";
@@ -10,7 +10,7 @@ import { FormularyDataDO } from "./do";
 
 export { FormularyDataDO };
 
-export class MyMCP extends McpAgent<Env> {
+export class MyMCP extends StatelessMcpWorker<Env> {
     server = new McpServer({
         name: "cms-formulary",
         version: "0.1.0",
@@ -34,7 +34,7 @@ export default {
         }
 
         if (url.pathname === "/mcp") {
-            return MyMCP.serve("/mcp", { binding: "MCP_OBJECT" }).fetch(request, env, ctx);
+            return MyMCP.serve("/mcp").fetch(request, env, ctx);
         }
 
         return new Response("Not found", { status: 404 });
