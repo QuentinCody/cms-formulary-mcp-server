@@ -5,6 +5,7 @@ import type { ZipDirectory, ZipEntry } from "./zip-directory";
 function entry(name: string, localHeaderOffset: number, compressedSize = 1000): ZipEntry {
     return {
         name,
+        crc32: 0,
         method: 8,
         compressedSize,
         uncompressedSize: compressedSize * 2,
@@ -82,6 +83,11 @@ describe("findEntry", () => {
 
         expect(() => findEntry(dir, "plans")).toThrow(/No entry starting with "plan information"/);
         expect(() => findEntry(dir, "plans")).toThrow(/something else entirely\.zip/);
+    });
+
+    it("rejects duplicate matching members instead of selecting by archive order", () => {
+        const dir = cmsDirectory({ entries: [entry("plan information A.zip", 0), entry("plan information B.zip", 1000)] });
+        expect(() => findEntry(dir, "plans")).toThrow(/Ambiguous/);
     });
 });
 

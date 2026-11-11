@@ -7,6 +7,7 @@ import { registerQueryData } from "./tools/query-data";
 import { registerGetSchema } from "./tools/get-schema";
 import { registerCodeMode } from "./tools/code-mode";
 import { FormularyDataDO } from "./do";
+import { routeNetworkImport, type NetworkImportEnv } from "./lib/network-route";
 
 export { FormularyDataDO };
 
@@ -28,6 +29,10 @@ export class MyMCP extends StatelessMcpWorker<Env> {
 export default {
     fetch(request: Request, env: Env, ctx: ExecutionContext) {
         const url = new URL(request.url);
+
+        if (url.pathname.startsWith("/pharmacy-network/import/")) {
+            return routeNetworkImport(request, env as Env & NetworkImportEnv);
+        }
 
         if (url.pathname === "/health") {
             return buildHealthResponse("cms-formulary");

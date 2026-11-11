@@ -1,84 +1,35 @@
 import { RestStagingDO } from "@bio-mcp/shared/staging/rest-staging-do";
 import type { SchemaHints } from "@bio-mcp/shared/staging/schema-inference";
+import { NetworkStore } from "./lib/network-store";
+import { handleNetworkRequest } from "./lib/network-route";
 
 export class FormularyDataDO extends RestStagingDO {
-    protected getSchemaHints(data: unknown): SchemaHints | undefined {
-        if (!data || typeof data !== "object") return undefined;
-
-        if (Array.isArray(data)) {
-            const sample = data[0];
-            if (sample && typeof sample === "object") {
-                // Basic Drugs Formulary data — NDCs with tier and utilization management
-                if ("NDC" in sample || "ndc" in sample) {
-                    return {
-                        tableName: "formulary_drugs",
-                        indexes: [
-                            "NDC",
-                            "ndc",
-                            "FORMULARY_ID",
-                            "formulary_id",
-                            "TIER_LEVEL_CODE",
-                            "tier_level_code",
-                            "PRIOR_AUTHORIZATION_YN",
-                            "prior_authorization_yn",
-                        ],
-                    };
-                }
-                // Plan Info data
-                if (
-                    ("CONTRACT_ID" in sample || "contract_id" in sample) &&
-                    ("PLAN_ID" in sample || "plan_id" in sample)
-                ) {
-                    return {
-                        tableName: "plan_info",
-                        indexes: [
-                            "CONTRACT_ID",
-                            "contract_id",
-                            "PLAN_ID",
-                            "plan_id",
-                            "FORMULARY_ID",
-                            "formulary_id",
-                            "PLAN_NAME",
-                            "plan_name",
-                        ],
-                    };
-                }
-                // Beneficiary Cost data
-                if ("COST_AMT_PREF" in sample || "cost_amt_pref" in sample || "DAYS_SUPPLY" in sample || "days_supply" in sample) {
-                    return {
-                        tableName: "beneficiary_cost",
-                        indexes: [
-                            "FORMULARY_ID",
-                            "formulary_id",
-                            "TIER" ,
-                            "tier",
-                            "DAYS_SUPPLY",
-                            "days_supply",
-                            "COST_TYPE_PREF",
-                            "cost_type_pref",
-                        ],
-                    };
-                }
-            }
-        }
-
-        // Single record (object, not array) — use `in` operator for safe narrowing
-        if ("NDC" in data || "ndc" in data) {
-            return {
-                tableName: "formulary_drugs",
-                indexes: ["NDC", "ndc", "FORMULARY_ID", "formulary_id"],
-            };
-        }
-        if (
-            ("CONTRACT_ID" in data || "contract_id" in data) &&
-            ("PLAN_ID" in data || "plan_id" in data)
-        ) {
-            return {
-                tableName: "plan_info",
-                indexes: ["CONTRACT_ID", "contract_id", "PLAN_ID", "plan_id"],
-            };
-        }
-
-        return undefined;
+  private network?: NetworkStore;
+  async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname.startsWith("/network-import/")) {
+      this.network ??= new NetworkStore(this.sql, work => this.ctx.storage.transactionSync(work));
+      return handleNetworkRequest(request, this.network);
     }
+    return super.fetch(request);
+  }
+
+  protected getSchemaHints(data: unknown): SchemaHints | undefined {
+    if (!data || typeof data !== "object") return undefined;
+    const rows = "results" in data && Array.isArray(data.results) ? data.results : undefined;
+    const sample = rows ? rows[0] : Array.isArray(data) ? data[0] : data;
+    if (!sample || typeof sample !== "object") return undefined;
+    const columns = Object.keys(sample);
+    const lookup = new Set(columns.map(column => column.toUpperCase()));
+    let tableName: string;
+    if (lookup.has("NDC")) tableName = "formulary_drugs";
+    else if (lookup.has("COPAY_AMT_PREF_INSLN")) tableName = "insulin_cost";
+    else if (lookup.has("COST_AMT_PREF") || lookup.has("DAYS_SUPPLY")) tableName = "beneficiary_cost";
+    else if (lookup.has("CONTRACT_ID") && lookup.has("PLAN_ID")) tableName = "plan_info";
+    else return undefined;
+    return {
+      ...(rows ? {} : { tableName }),
+      indexes: columns.filter(column => ["CONTRACT_ID", "PLAN_ID", "SEGMENT_ID", "FORMULARY_ID", "NDC", "TIER", "TIER_LEVEL_VALUE", "DAYS_SUPPLY"].includes(column.toUpperCase())),
+      columnTypes: Object.fromEntries(columns.map(column => [column, "TEXT"])),
+    };
+  }
 }

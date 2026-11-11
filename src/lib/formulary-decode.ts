@@ -10,25 +10,17 @@
  * 1.12M rows, which a 128MB Worker cannot hold. streamFormularyMatches() exists
  * so that file is filtered line-by-line and never fully materialized.
  */
+import { pipeHeaders, pipeValues, pipeRecord } from "./formulary-query";
+import { fail } from "./snapshot-http";
+import { MemberDigest } from "./member-evidence";
 import { unzipSync } from "fflate";
 import { readU16, readU32 } from "./zip-directory";
 
 export function parsePipeDelimited(text: string): Record<string, string>[] {
-    const lines = text.trim().split("\n");
-    if (lines.length < 2) return [];
-    const headers = lines[0].split("|").map((h) => h.trim());
-    const records: Record<string, string>[] = [];
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const values = line.split("|");
-        const record: Record<string, string> = {};
-        for (let j = 0; j < headers.length; j++) {
-            record[headers[j]] = (values[j] ?? "").trim();
-        }
-        records.push(record);
-    }
-    return records;
+    const lines = text.split("\n").map(line => line.endsWith("\r") ? line.slice(0, -1) : line);
+    if (!lines[0]) return [];
+    const headers = pipeHeaders(lines[0]);
+    return lines.slice(1).filter(line => line !== "").map(line => pipeRecord(headers, pipeValues(line, headers)));
 }
 
 /**
@@ -57,8 +49,22 @@ export function sliceZipEntryDeflate(buffer: Uint8Array): Uint8Array | null {
 
 /** Inflate a raw-deflate buffer fully via the native DecompressionStream API. */
 export async function inflateRaw(deflate: Uint8Array): Promise<Uint8Array> {
-    const stream = new Blob([deflate]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([deflate]).stream().pipeThrough(new DecompressionStream("deflate-raw")).getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 16 * 1024 * 1024) fail("Nested CMS ZIP exceeds 16 MiB", 502);
+            chunks.push(value);
+        }
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+        return bytes;
+    } finally { void reader.cancel().catch(() => {}); }
 }
 
 /**
@@ -147,6 +153,7 @@ export function buildStreamFilters(params: Record<string, unknown>): StreamFilte
                 key !== "limit" &&
                 key !== "offset" &&
                 key !== "size" &&
+                key !== "source_encoding" &&
                 val !== undefined &&
                 val !== "",
         )
@@ -162,58 +169,75 @@ export async function streamFormularyMatches(
     txtDeflate: Uint8Array,
     filters: StreamFilter[],
     cap: number,
-): Promise<{ matched: number; total: number; records: Record<string, string>[] }> {
+    offset = 0,
+    source?: { encoding: "utf-8" | "windows-1252"; size: number; crc32: number },
+) {
     const reader = new Blob([txtDeflate])
         .stream()
         .pipeThrough(new DecompressionStream("deflate-raw"))
         .getReader();
-    const decoder = new TextDecoder("utf-8");
+    const decoder = new TextDecoder(source?.encoding ?? "utf-8", { fatal: true, ignoreBOM: false });
+    const digest = new MemberDigest();
 
+    let decodedBytes = 0;
     let buffer = "";
-    let headers: string[] | null = null;
-    const headerIdx: Record<string, number> = {};
-    let total = 0;
-    let matched = 0;
-    const records: Record<string, string>[] = [];
+    const collector = createFormularyCollector(filters, offset, cap);
 
-    const handleLine = (line: string): void => {
-        const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
-        if (headers === null) {
-            headers = trimmed.split("|").map((h) => h.trim());
-            headers.forEach((h, i) => { headerIdx[h] = i; });
-            return;
-        }
-        if (!trimmed) return;
-        total++;
-        const values = trimmed.split("|");
-        for (const [key, needle] of filters) {
-            const idx = headerIdx[key];
-            if (idx === undefined || !(values[idx] ?? "").toLowerCase().includes(needle)) {
-                return;
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            decodedBytes += value.byteLength;
+            digest.update(value);
+            if (decodedBytes > 128 * 1024 * 1024) fail("CMS text member exceeds 128 MiB", 502);
+            buffer += decoder.decode(value, { stream: true });
+            let nl = buffer.indexOf("\n");
+            while (nl >= 0) {
+                collector.handleLine(buffer.slice(0, nl));
+                buffer = buffer.slice(nl + 1);
+                nl = buffer.indexOf("\n");
             }
+            if (buffer.length > 65536) fail("CMS source record exceeds 64 KiB", 502);
         }
-        matched++;
-        if (records.length < cap) {
-            const record: Record<string, string> = {};
-            for (let j = 0; j < headers.length; j++) {
-                record[headers[j]] = (values[j] ?? "").trim();
-            }
-            records.push(record);
-        }
-    };
+        buffer += decoder.decode();
+        if (buffer.length > 0) collector.handleLine(buffer);
+        if (!collector.headers) fail("CMS source header is missing", 502);
+        const evidence = digest.finish(source);
+        return { matched: collector.matched, total: collector.total, records: collector.records, ...(source ? { source_text: { ...evidence, encoding: source.encoding } } : {}) };
+    } catch (error) {
+        if (error instanceof TypeError) fail("CMS source text cannot be decoded with the selected encoding", 502);
+        throw error;
+    } finally { void reader.cancel().catch(() => {}); }
+}
 
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl = buffer.indexOf("\n");
-        while (nl >= 0) {
-            handleLine(buffer.slice(0, nl));
-            buffer = buffer.slice(nl + 1);
-            nl = buffer.indexOf("\n");
-        }
-    }
-    if (buffer.length > 0) handleLine(buffer);
+function createFormularyCollector(filters: StreamFilter[], offset: number, cap: number) {
+  let headers: string[] | null = null;
+  const headerIdx = new Map<string, number>();
+  let total = 0;
+  let matched = 0;
+  const records: Record<string, string>[] = [];
 
-    return { matched, total, records };
+  const handleLine = (line: string): void => {
+      if (line.length > 65536) fail("CMS source record exceeds 64 KiB", 502);
+      const trimmed = line.endsWith("\r") ? line.slice(0, -1) : line;
+      if (headers === null) {
+          headers = pipeHeaders(trimmed);
+          headers.forEach((h, i) => { headerIdx.set(h.toLowerCase(), i); });
+          for (const [key] of filters) if (!headerIdx.has(key.toLowerCase())) fail(`Unknown CMS column: ${key}`);
+          return;
+      }
+      if (!trimmed) return;
+      total++;
+      const values = pipeValues(trimmed, headers);
+      for (const [key, needle] of filters) {
+          const idx = headerIdx.get(key.toLowerCase());
+          if (idx === undefined || !(values[idx] ?? "").toLowerCase().includes(needle)) {
+              return;
+          }
+      }
+      matched++;
+      if (matched > offset && records.length < cap) records.push(pipeRecord(headers, values));
+  };
+
+  return { handleLine, records, get headers() { return headers; }, get matched() { return matched; }, get total() { return total; } };
 }

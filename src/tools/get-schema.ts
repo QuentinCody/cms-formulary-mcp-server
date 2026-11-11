@@ -1,3 +1,4 @@
+import { formularyResponse } from "../lib/tool-result";
 import type { McpServer } from "@bio-mcp/shared/mcp";
 import { z } from "zod";
 import { createGetSchemaHandler } from "@bio-mcp/shared/staging/utils";
@@ -9,8 +10,8 @@ interface SchemaEnv {
 export function registerGetSchema(server: McpServer, env?: SchemaEnv): void {
     const handler = createGetSchemaHandler("FORMULARY_DATA_DO", "formulary");
 
-    server.registerTool(
-        "formulary_get_schema",
+    for (const name of ["formulary_get_schema", "mcp_formulary_get_schema"]) server.registerTool(
+        name,
         {
             title: "Get Staged Data Schema",
             description:
@@ -24,11 +25,11 @@ export function registerGetSchema(server: McpServer, env?: SchemaEnv): void {
         },
         async (args, extra) => {
             const runtimeEnv = env || (extra as { env?: SchemaEnv })?.env || {};
-            return handler(
+            return formularyResponse(() => handler(
                 args as Record<string, unknown>,
                 runtimeEnv as Record<string, unknown>,
                 (extra as Record<string, unknown>),
-            );
+            ), runtimeEnv, name, extra, args);
         },
     );
 }

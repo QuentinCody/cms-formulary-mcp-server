@@ -171,6 +171,20 @@ describe("buildStreamFilters", () => {
 });
 
 describe("streamFormularyMatches", () => {
+    it("preserves whitespace, empty cells and casing while paging beyond 1,000 matches", async () => {
+        const text = "ID|coin_amt_pref_insln|note\r\n" + Array.from({ length: 1103 }, (_, i) => `${String(i).padStart(5, "0")}|.2500|  native 🧬  `).join("\r\n") + "\r\n";
+        const out = await streamFormularyMatches(deflateSync(strToU8(text)), [["COIN_AMT_PREF_INSLN", ".25"]], 2, 1100);
+        expect(out).toEqual({ matched: 1103, total: 1103, records: [
+            { ID: "01100", coin_amt_pref_insln: ".2500", note: "  native 🧬  " },
+            { ID: "01101", coin_amt_pref_insln: ".2500", note: "  native 🧬  " },
+        ] });
+    });
+    it.each(["A|a\n1|2", "A|B\n1", "A|B\n1|2|3"])("rejects ambiguous headers or malformed widths before reporting a complete scan", async text => {
+        await expect(streamFormularyMatches(deflateSync(strToU8(text)), [], 10)).rejects.toMatchObject({ status: 502 });
+    });
+    it("rejects unknown filter columns", async () => {
+        await expect(streamFormularyMatches(deflateSync(strToU8("A|B\n1|2\n")), [["TYPO", "1"]], 10)).rejects.toMatchObject({ status: 400 });
+    });
     const FORMULARY_TXT =
         "FORMULARY_ID|NDC|TIER_LEVEL_CODE\r\n" +
         "00026408|00002143380|1\r\n" +

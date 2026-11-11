@@ -15,6 +15,8 @@
  * caller's policy decision.
  */
 
+import { boundedFetch, fail } from "./snapshot-http";
+
 /** Read a little-endian uint16 from a byte array. */
 export function readU16(d: Uint8Array, o: number): number {
     return d[o] | (d[o + 1] << 8);
@@ -56,6 +58,8 @@ export const LOCAL_HEADER_BYTES = 30;
 
 export interface ZipEntry {
     name: string;
+    /** Advertised central-directory CRC32; not verified until member bytes are read. */
+    crc32: number;
     /** Compression method: 8 = deflate, 0 = stored. */
     method: number;
     compressedSize: number;
@@ -85,16 +89,14 @@ export async function fetchRange(
     what: string,
     userAgent: string,
 ): Promise<Uint8Array> {
-    const resp = await fetch(url, {
-        headers: { Range: `bytes=${start}-${end}`, "User-Agent": userAgent },
+    const length = end - start + 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || length < 1 || length > 16 * 1024 * 1024) fail("Invalid or oversized ZIP byte range");
+    const response = await boundedFetch(url, { headers: { Range: `bytes=${start}-${end}`, "User-Agent": userAgent } }, length, resp => {
+        const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(resp.headers.get("content-range") ?? "");
+        if (resp.status !== 206 || !range || Number(range[1]) !== start || Number(range[2]) !== end || !Number.isSafeInteger(Number(range[3])) || Number(range[3]) <= end) fail(`Invalid ZIP range response while reading ${what}`, 502);
     });
-    if (!resp.ok && resp.status !== 206) {
-        throw new Error(
-            `ZIP range request failed while reading ${what}: HTTP ${resp.status} ` +
-            `(requested bytes=${start}-${end} of ${url}).`,
-        );
-    }
-    return new Uint8Array(await resp.arrayBuffer());
+    if (response.bytes.length !== length) fail(`Truncated ZIP range while reading ${what}`, 502);
+    return response.bytes;
 }
 
 /**
@@ -105,9 +107,9 @@ export async function fetchRange(
 export async function getObjectSize(url: string, userAgent: string): Promise<number> {
     let headProblem: string;
     try {
-        const head = await fetch(url, { method: "HEAD", headers: { "User-Agent": userAgent } });
+        const head = await boundedFetch(url, { method: "HEAD", headers: { "User-Agent": userAgent } }, 0);
         const len = Number(head.headers.get("content-length"));
-        if (head.ok && Number.isFinite(len) && len > 0) return len;
+        if (Number.isSafeInteger(len) && len > 0) return len;
         headProblem =
             `HEAD returned HTTP ${head.status} with content-length=` +
             `${head.headers.get("content-length") ?? "none"}`;
@@ -115,18 +117,19 @@ export async function getObjectSize(url: string, userAgent: string): Promise<num
         headProblem = `HEAD threw: ${err instanceof Error ? err.message : String(err)}`;
     }
 
-    const probe = await fetch(url, { headers: { Range: "bytes=-1", "User-Agent": userAgent } });
+    const probe = await boundedFetch(url, { headers: { Range: "bytes=-1", "User-Agent": userAgent } }, 1, response => {
+        if (response.status !== 206) fail("CMS suffix-range probe requires HTTP 206", 502);
+    });
     const contentRange = probe.headers.get("content-range");
-    // Drain the 1-byte body so the connection can be reused.
-    await probe.arrayBuffer().catch(() => new ArrayBuffer(0));
-    const total = contentRange?.match(/\/(\d+)\s*$/)?.[1];
-    if (!total) {
+    const range = contentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+    const total = Number(range?.[3]);
+    if (!range || !Number.isSafeInteger(total) || total < 1 || Number(range[1]) !== total - 1 || Number(range[2]) !== total - 1 || probe.bytes.length !== 1) {
         throw new Error(
             `Could not determine the size of ${url}: ${headProblem}; the suffix-range probe ` +
             `returned content-range=${contentRange ?? "none"}.`,
         );
     }
-    return Number(total);
+    return total;
 }
 
 interface CdLocation {
@@ -234,7 +237,7 @@ export function parseCentralDirectory(cd: Uint8Array, url: string): ZipEntry[] {
             ef += 4 + headerSize;
         }
 
-        entries.push({ name, method, compressedSize, uncompressedSize, localHeaderOffset, nameLength });
+        entries.push({ name, crc32: readU32(cd, p + 16), method, compressedSize, uncompressedSize, localHeaderOffset, nameLength });
         p += 46 + nameLength + extraLength + commentLength;
     }
 
