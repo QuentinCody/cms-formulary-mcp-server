@@ -1,3 +1,4 @@
+import { validExtractId } from "./lib/network-input";
 import { buildHealthResponse, configureCitationSigning } from "@bio-mcp/shared";
 // CMS Formulary MCP Server — Medicare formulary coverage and restrictions
 // Code Mode only: cms_formulary_search, cms_formulary_execute, query_data, get_schema
@@ -10,6 +11,8 @@ import { FormularyDataDO } from "./do";
 import { routeNetworkImport, type NetworkImportEnv } from "./lib/network-route";
 
 export { FormularyDataDO };
+
+const networkReads = new Set(["POST /network-import/extract", "POST /network-import/fees"]);
 
 export class MyMCP extends StatelessMcpWorker<Env> {
     server = new McpServer({
@@ -46,7 +49,9 @@ export default {
         }
 
         if (url.pathname === "/mcp") {
-            return MyMCP.serve("/mcp").fetch(request, env, ctx);
+            return MyMCP.serve("/mcp", {
+                publishedDataReads: (binding, name) => binding === "FORMULARY_DATA_DO" && validExtractId(name) ? networkReads : undefined,
+            }).fetch(request, env, ctx);
         }
 
         return new Response("Not found", { status: 404 });
